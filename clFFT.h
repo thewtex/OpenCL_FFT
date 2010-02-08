@@ -53,7 +53,11 @@
 extern "C" {
 #endif
 
+#if defined(__APPLE__) || defined(__MACOSX)
 #include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
 #include <stdio.h>
 
 // XForm type

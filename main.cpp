@@ -50,7 +50,11 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(__APPLE__) || defined(__MACOSX)
 #include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
 #include "clFFT.h"
 #include <mach/mach_time.h>
 #include <Accelerate/Accelerate.h>
