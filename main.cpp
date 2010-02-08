@@ -56,11 +56,10 @@
 #include <CL/cl.h>
 #endif
 #include "clFFT.h"
-#include <mach/mach_time.h>
-#include <Accelerate/Accelerate.h>
 #include "procs.h"
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <stdint.h>
 #include <float.h>
 
@@ -89,245 +88,14 @@ cl_device_id     device_id;
 cl_context       context;
 cl_command_queue queue;
 
-typedef unsigned long long ulong;
-
-double subtractTimes( uint64_t endTime, uint64_t startTime )
+double subtractTimes( struct timeval *endTime, struct timeval *startTime )
 {
-    uint64_t difference = endTime - startTime;
-    static double conversion = 0.0;
+  long long int difference = (endTime->tv_usec + 1000000 * endTime->tv_sec) - (startTime->tv_usec + 1000000 * startTime->tv_sec);
+  static double conversion = 1./1000000.0;
     
-    if( conversion == 0.0 )
-    {
-        mach_timebase_info_data_t info;
-        kern_return_t err = mach_timebase_info( &info );
-        
-		//Convert the timebase into seconds
-        if( err == 0  )
-			conversion = 1e-9 * (double) info.numer / (double) info.denom;
-    }
-    
-    return conversion * (double) difference;
+  return conversion * (double) difference;
 }
 
-void computeReferenceF(clFFT_SplitComplex *out, clFFT_Dim3 n, 
-					  unsigned int batchSize, clFFT_Dimension dim, clFFT_Direction dir)
-{
-	FFTSetup plan_vdsp;
-	DSPSplitComplex out_vdsp;
-	FFTDirection dir_vdsp = dir == clFFT_Forward ? FFT_FORWARD : FFT_INVERSE;
-	
-	unsigned int i, j, k;
-	unsigned int stride;
-	unsigned int log2Nx = (unsigned int) log2(n.x);
-	unsigned int log2Ny = (unsigned int) log2(n.y);
-	unsigned int log2Nz = (unsigned int) log2(n.z);
-	unsigned int log2N;
-	
-	log2N = log2Nx;
-	log2N = log2N > log2Ny ? log2N : log2Ny;
-	log2N = log2N > log2Nz ? log2N : log2Nz;
-	
-	plan_vdsp = vDSP_create_fftsetup(log2N, 2);
-	
-	switch(dim)
-	{
-		case clFFT_1D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				stride = i * n.x;
-				out_vdsp.realp  = out->real  + stride;
-				out_vdsp.imagp  = out->imag  + stride;
-				
-			    vDSP_fft_zip(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-			}
-			break;
-			
-		case clFFT_2D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.y; j++)
-				{
-					stride = j * n.x + i * n.x * n.y;
-					out_vdsp.realp = out->real + stride;
-					out_vdsp.imagp = out->imag + stride;
-					
-					vDSP_fft_zip(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.x; j++)
-				{
-					stride = j + i * n.x  * n.y;
-					out_vdsp.realp = out->real + stride;
-					out_vdsp.imagp = out->imag + stride;
-					
-					vDSP_fft_zip(plan_vdsp, &out_vdsp, n.x, log2Ny, dir_vdsp);
-				}
-			}
-			break;
-			
-		case clFFT_3D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.z; j++)
-				{
-					for(k = 0; k < n.y; k++)
-					{
-						stride = k * n.x + j * n.x * n.y + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zip(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-					}
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.z; j++)
-				{
-					for(k = 0; k < n.x; k++)
-					{
-						stride = k + j * n.x * n.y + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zip(plan_vdsp, &out_vdsp, n.x, log2Ny, dir_vdsp);
-					}
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.y; j++)
-				{
-					for(k = 0; k < n.x; k++)
-					{
-						stride = k + j * n.x + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zip(plan_vdsp, &out_vdsp, n.x*n.y, log2Nz, dir_vdsp);
-					}
-				}
-			}
-			break;
-	}
-	
-	vDSP_destroy_fftsetup(plan_vdsp);
-}
-
-void computeReferenceD(clFFT_SplitComplexDouble *out, clFFT_Dim3 n, 
-					  unsigned int batchSize, clFFT_Dimension dim, clFFT_Direction dir)
-{
-	FFTSetupD plan_vdsp;
-	DSPDoubleSplitComplex out_vdsp;
-	FFTDirection dir_vdsp = dir == clFFT_Forward ? FFT_FORWARD : FFT_INVERSE;
-	
-	unsigned int i, j, k;
-	unsigned int stride;
-	unsigned int log2Nx = (int) log2(n.x);
-	unsigned int log2Ny = (int) log2(n.y);
-	unsigned int log2Nz = (int) log2(n.z);
-	unsigned int log2N;
-	
-	log2N = log2Nx;
-	log2N = log2N > log2Ny ? log2N : log2Ny;
-	log2N = log2N > log2Nz ? log2N : log2Nz;
-	
-	plan_vdsp = vDSP_create_fftsetupD(log2N, 2);
-	
-	switch(dim)
-	{
-		case clFFT_1D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				stride = i * n.x;
-				out_vdsp.realp  = out->real  + stride;
-				out_vdsp.imagp  = out->imag  + stride;
-				
-			    vDSP_fft_zipD(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-			}
-			break;
-			
-		case clFFT_2D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.y; j++)
-				{
-					stride = j * n.x + i * n.x * n.y;
-					out_vdsp.realp = out->real + stride;
-					out_vdsp.imagp = out->imag + stride;
-					
-					vDSP_fft_zipD(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.x; j++)
-				{
-					stride = j + i * n.x  * n.y;
-					out_vdsp.realp = out->real + stride;
-					out_vdsp.imagp = out->imag + stride;
-					
-					vDSP_fft_zipD(plan_vdsp, &out_vdsp, n.x, log2Ny, dir_vdsp);
-				}
-			}
-			break;
-			
-		case clFFT_3D:
-			
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.z; j++)
-				{
-					for(k = 0; k < n.y; k++)
-					{
-						stride = k * n.x + j * n.x * n.y + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zipD(plan_vdsp, &out_vdsp, 1, log2Nx, dir_vdsp);
-					}
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.z; j++)
-				{
-					for(k = 0; k < n.x; k++)
-					{
-						stride = k + j * n.x * n.y + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zipD(plan_vdsp, &out_vdsp, n.x, log2Ny, dir_vdsp);
-					}
-				}
-			}
-			for(i = 0; i < batchSize; i++)
-			{
-				for(j = 0; j < n.y; j++)
-				{
-					for(k = 0; k < n.x; k++)
-					{
-						stride = k + j * n.x + i * n.x * n.y * n.z;
-						out_vdsp.realp = out->real + stride;
-						out_vdsp.imagp = out->imag + stride;
-						
-						vDSP_fft_zipD(plan_vdsp, &out_vdsp, n.x*n.y, log2Nz, dir_vdsp);
-					}
-				}
-			}
-			break;
-	}
-	
-	vDSP_destroy_fftsetupD(plan_vdsp);
-}
 
 double complexNormSq(clFFT_ComplexDouble a)
 {
@@ -378,7 +146,6 @@ int runTest(clFFT_Dim3 n, int batchSize, clFFT_Direction dir, clFFT_Dimension di
 	int iter;
 	double t;
 	
-	uint64_t t0, t1;
 	int mx = log2(n.x);
 	int my = log2(n.y);
 	int mz = log2(n.z);
@@ -535,7 +302,8 @@ int runTest(clFFT_Dim3 n, int batchSize, clFFT_Direction dir, clFFT_Dimension di
 			
 	err = CL_SUCCESS;
 	
-	t0 = mach_absolute_time();
+	struct timeval t0;
+	gettimeofday( &t0, NULL);
 	if(dataFormat == clFFT_SplitComplexFormat)
 	{
 		for(iter = 0; iter < numIter; iter++)
@@ -555,8 +323,9 @@ int runTest(clFFT_Dim3 n, int batchSize, clFFT_Direction dir, clFFT_Dimension di
 		goto cleanup;	
 	}
 	
-	t1 = mach_absolute_time(); 
-	t = subtractTimes(t1, t0);
+	struct timeval t1;
+	gettimeofday( &t1, NULL );
+	t = subtractTimes( &t1, &t0);
 	char temp[100];
 	sprintf(temp, "GFlops achieved for n = (%d, %d, %d), batchsize = %d", n.x, n.y, n.z, batchSize);
 	log_perf(gflops / (float) t, 1, "GFlops/s", "%s", temp);
@@ -577,30 +346,6 @@ int runTest(clFFT_Dim3 n, int batchSize, clFFT_Direction dir, clFFT_Dimension di
         goto cleanup;
 	}	
 
-	computeReferenceD(&data_oref, n, batchSize, dim, dir);
-	
-	double diff_avg, diff_max, diff_min;
-	if(dataFormat == clFFT_SplitComplexFormat) {
-		diff_avg = computeL2Error(&data_cl_split, &data_oref, n.x*n.y*n.z, batchSize, &diff_max, &diff_min);
-		if(diff_avg > eps_avg)
-			log_error("Test failed (n=(%d, %d, %d), batchsize=%d): %s Test: rel. L2-error = %f eps (max=%f eps, min=%f eps)\n", n.x, n.y, n.z, batchSize, (testType == clFFT_OUT_OF_PLACE) ? "out-of-place" : "in-place", diff_avg, diff_max, diff_min);
-		else
-			log_info("Test passed (n=(%d, %d, %d), batchsize=%d): %s Test: rel. L2-error = %f eps (max=%f eps, min=%f eps)\n", n.x, n.y, n.z, batchSize, (testType == clFFT_OUT_OF_PLACE) ? "out-of-place" : "in-place", diff_avg, diff_max, diff_min);			
-	}
-	else {
-		clFFT_SplitComplex result_split;
-		result_split.real = (float *) malloc(length*sizeof(float));
-		result_split.imag = (float *) malloc(length*sizeof(float));
-		convertInterleavedToSplit(&result_split, data_cl, length);
-		diff_avg = computeL2Error(&result_split, &data_oref, n.x*n.y*n.z, batchSize, &diff_max, &diff_min);
-		
-		if(diff_avg > eps_avg)
-			log_error("Test failed (n=(%d, %d, %d), batchsize=%d): %s Test: rel. L2-error = %f eps (max=%f eps, min=%f eps)\n", n.x, n.y, n.z, batchSize, (testType == clFFT_OUT_OF_PLACE) ? "out-of-place" : "in-place", diff_avg, diff_max, diff_min);
-		else
-			log_info("Test passed (n=(%d, %d, %d), batchsize=%d): %s Test: rel. L2-error = %f eps (max=%f eps, min=%f eps)\n", n.x, n.y, n.z, batchSize, (testType == clFFT_OUT_OF_PLACE) ? "out-of-place" : "in-place", diff_avg, diff_max, diff_min);	
-		free(result_split.real);
-		free(result_split.imag);
-	}
 	
 cleanup:
 	clFFT_DestroyPlan(plan);	
