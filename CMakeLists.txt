@@ -14,7 +14,7 @@ add_library( OpenCL_FFT SHARED
   fft_setup.cpp
   )
 set_target_properties( OpenCL_FFT 
-  PROPERTIES SOVERSION 1.2 
+  PROPERTIES SOVERSION 1.3 
   )
 target_link_libraries( OpenCL_FFT
   ${OPENCL_LIBRARIES}
