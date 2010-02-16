@@ -53,6 +53,7 @@
 #include <math.h>
 
 #define max(a,b) (((a)>(b)) ? (a) : (b))
+#define min(a,b) (((a)<(b)) ? (a) : (b))
 
 static cl_int
 allocateTemporaryBufferInterleaved(cl_fft_plan *plan, cl_uint batchSize)
@@ -140,7 +141,7 @@ clFFT_ExecuteInterleaved( cl_command_queue queue, clFFT_Plan Plan, cl_int batchS
 	
 	cl_int err;
 	size_t gWorkItems, lWorkItems;
-	int inPlaceDone = 0;
+	int inPlaceDone;
 	
 	cl_int isInPlace = data_in == data_out ? 1 : 0;
 	
@@ -164,6 +165,7 @@ clFFT_ExecuteInterleaved( cl_command_queue queue, clFFT_Plan Plan, cl_int batchS
 		// in-place transform
 		if(isInPlace) 
 		{
+			inPlaceDone = 0;
 			currRead  = 1;
 			currWrite = 2;
 		}
@@ -237,7 +239,7 @@ clFFT_ExecutePlannar( cl_command_queue queue, clFFT_Plan Plan, cl_int batchSize,
 	
 	cl_int err;
 	size_t gWorkItems, lWorkItems;
-	int inPlaceDone = 0;
+	int inPlaceDone;
 	
 	cl_int isInPlace = ((data_in_real == data_out_real) && (data_in_imag == data_out_imag)) ? 1 : 0;
 	
@@ -266,6 +268,7 @@ clFFT_ExecutePlannar( cl_command_queue queue, clFFT_Plan Plan, cl_int batchSize,
 		// in-place transform
 		if(isInPlace) 
 		{
+			inPlaceDone = 0;
 			currRead  = 1;
 			currWrite = 2;
 		}
@@ -342,8 +345,19 @@ clFFT_1DTwistInterleaved(clFFT_Plan Plan, cl_command_queue queue, cl_mem array,
 	int d = dir;
 	int err = 0;
 	
-	size_t numGlobalThreads[1] = { numCols };
-	size_t numLocalThreads[1]  = { max(numCols / 128, 1)*128 };
+	cl_device_id device_id;
+	err = clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(cl_device_id), &device_id, NULL);
+	if(err)
+	    return err;
+	
+	size_t gSize;
+	err = clGetKernelWorkGroupInfo(plan->twist_kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &gSize, NULL);
+	if(err)
+	    return err;
+	      
+	gSize = min(128, gSize);
+	size_t numGlobalThreads[1] = { max(numCols / gSize, 1)*gSize };
+	size_t numLocalThreads[1]  = { gSize };
 	
 	err |= clSetKernelArg(plan->twist_kernel, 0, sizeof(cl_mem), &array);
 	err |= clSetKernelArg(plan->twist_kernel, 1, sizeof(unsigned int), &sRow);
@@ -370,8 +384,19 @@ clFFT_1DTwistPlannar(clFFT_Plan Plan, cl_command_queue queue, cl_mem array_real,
 	int d = dir;
 	int err = 0;
 	
-	size_t numGlobalThreads[1] = { numCols };
-	size_t numLocalThreads[1]  = { max(numCols / 128, 1)*128 };
+	cl_device_id device_id;
+	err = clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(cl_device_id), &device_id, NULL);
+	if(err)
+	    return err;
+	
+	size_t gSize;
+	err = clGetKernelWorkGroupInfo(plan->twist_kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &gSize, NULL);
+	if(err)
+	    return err;
+	      
+	gSize = min(128, gSize);
+	size_t numGlobalThreads[1] = { max(numCols / gSize, 1)*gSize };
+	size_t numLocalThreads[1]  = { gSize };
 	
 	err |= clSetKernelArg(plan->twist_kernel, 0, sizeof(cl_mem), &array_real);
 	err |= clSetKernelArg(plan->twist_kernel, 1, sizeof(cl_mem), &array_imag);
