@@ -5,6 +5,10 @@ set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR} )
 
 find_package( OpenCL REQUIRED )
 
+# where all the executables go
+set( CMAKE_RUNTIME_OUTPUT_DIRECTORY
+  ${OPENCL_FFT_BINARY_DIR}/bin )
+
 include_directories( ${OPENCL_INCLUDE_DIRS} )
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR} )
 
@@ -31,13 +35,13 @@ install( FILES clFFT.h
 include( CTest )
 if( BUILD_TESTING )
   enable_testing()
-  add_executable( main
+  add_executable( OpenCL_FFT_performance
     main.cpp
     )
-  target_link_libraries( main
+  target_link_libraries( OpenCL_FFT_performance
     OpenCL_FFT
     )
-  add_test( main
-    main ${CMAKE_CURRENT_SOURCE_DIR}/param.txt
+  add_test( OpenCL_FFT_performance
+    ${OPENCL_FFT_BINARY_DIR}/bin/OpenCL_FFT_performance ${CMAKE_CURRENT_SOURCE_DIR}/param.txt
     )
 endif()
